@@ -1,0 +1,11 @@
+At the cable:
+GND - red
+SDA - yellow
+VDD - green
+SCL - white
+middle - grey
+
+To Car (Nunchuk - Car):
+Red (SCL)- Blue
+Brown (SDA) - Green
+Black (GND) - Black
