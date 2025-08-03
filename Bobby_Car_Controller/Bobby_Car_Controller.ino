@@ -1,139 +1,338 @@
 #include <SoftwareSerial.h>
+#include <Wire.h>
+#include "nunchuk.h"
+//#include <WiiChuck.h>
+// Accessory nunchuk1;
 
-// Pin for analog X joystick (Nunchuck)
-#define JOY_X_PIN A0  // Analog pin for X-axis
-
-// Joystick range definitions
-#define JOYSTICK_MIN 0     // Minimum analog value for joystick
-#define JOYSTICK_MAX 1023  // Maximum analog value for joystick
-
-// Speed range definitions
-#define SPEED_MIN -1000  // Minimum speed (backward)
-#define SPEED_MAX 1000   // Maximum speed (forward)
-
-// Pins for hoverboard USART communication (if using SoftwareSerial)
-#define RX_PIN 10
-#define TX_PIN 11
+// ########################## DEFINES ##########################
+// General
+#define VERSION "0.2 alpha"
 
 // Debugging mode (enable by uncommenting the line below)
 #define DEBUG_MODE  // Comment out to disable debug messages
+#ifdef DEBUG_MODE
+#define DEBUG_SERIAL_BAUD 115200  // [-] Baud rate for built-in Serial (used for the Serial Monitor)
+#endif
+// #define SIMULATE_NUNCHUK 1
 
-// Motorcontroller USART
-SoftwareSerial hoverboardSerial(RX_PIN, TX_PIN);  // RX, TX pins for USART communication
 
-// Feedback structure (based on the hoverboard packet structure)
-struct HoverboardFeedback {
-  int16_t cmd1;
-  int16_t cmd2;
-  int16_t speedLeft;
-  int16_t speedRight;
-  int16_t currentLeft;
-  int16_t currentRight;
-  int16_t voltage;
-  int16_t temperature;
-  int16_t cmdLed;
+#define HOVER_SERIAL_BAUD 115200  // [-] Baud rate for HoverSerial (used to communicate with the hoverboard)
+#define START_FRAME 0xABCD        // [-] Start frme definition for reliable serial communication
+#define TIME_SEND 100             // [ms] Sending time interval
+
+// Pins for hoverboard USART communication (if using SoftwareSerial)
+#define RX_PIN 3
+#define TX_PIN 2
+
+// BUZZER
+#define BUZZER_PIN 6
+
+// Joystick range definitions
+#define NUNCHUK_ACC_MIN 129     //
+#define NUNCHUK_ACC_MAX 255     //
+#define NUNCHUK_BRK_MIN 0       // 
+#define NUNCHUK_BRK_MAX 127     //
+#define NUNCHUK_SIGNAL_MIN 0    //
+#define NUNCHUK_SIGNAL_MAX 255  //
+bool initialNunchukRead = true;
+unsigned int acc_cmd_prev;
+
+struct modeParameters {
+  unsigned int MAX_SPEED_FORWARDS;
+  unsigned int MAX_SPEED_REVERSE;
+  float ACC_FORWARD;
+  float ACC_REVERSE;
 };
 
-HoverboardFeedback feedback;  // Create an instance of the feedback structure
+// Speed range definitions
+// Here you can tune the speeds and accelerations of the 3 modes:
+// Calculate as follows:
+// spd = rpm / 31.45
+// rpm = spd * 31.45
+const modeParameters MODES[4] = {
+  { 200 , 260, 0.01 , 0.01 },  // 4 km/h
+  { 400 , 260, 0.01 , 0.01 },  // 10 km/h
+  { 1000, 360, 0.005 , 0.02 },  // 17 km/h
+  { 1000, 360, 0.05 , 0.05 }  // 17 km/h
+};
+
+#define FREEWHEELING_DECELERATION 0.0005
+
+
+
+// ########################## VARIABLES ##########################
+// Loop Variables
+unsigned long iTimeSend = 0;
+float speed = 0;
+unsigned int driveMode = 0;  // Driving Mode. Modes 1-3 possible
+bool forceNunchukRelease = false;
+
+// Motorcontroller USART
+SoftwareSerial HoverSerial(RX_PIN, TX_PIN);  // RX, TX pins for USART communication
+
+// Command structure (based on the hoverboard packet structure)
+typedef struct {
+  uint16_t start;
+  int16_t steer;
+  int16_t speed;
+  uint16_t checksum;
+} SerialCommand;
+SerialCommand Command;
+
+
+// Feedback structure (based on the hoverboard packet structure)
+// struct HoverboardFeedback {
+//   int16_t cmd1;
+//   int16_t cmd2;
+//   int16_t speedLeft;
+//   int16_t speedRight;
+//   int16_t currentLeft;
+//   int16_t currentRight;
+//   int16_t voltage;
+//   int16_t temperature;
+//   int16_t cmdLed;
+// };
+// HoverboardFeedback feedback;  // Create an instance of the feedback structure
 
 void setup() {
-  // Start USART communication
-  hoverboardSerial.begin(115200);  // Start USART for motor controller
+  HoverSerial.begin(HOVER_SERIAL_BAUD);  // Start USART for motor controller
 
-  #ifdef DEBUG_MODE
-    Serial.begin(9600);  // Start serial monitor for debugging if debug mode is enabled
-    Serial.println("Debugging mode enabled");
-  #endif
+#ifdef DEBUG_MODE
+  Serial.begin(DEBUG_SERIAL_BAUD);  // Start serial monitor for debugging if debug mode is enabled
+  Serial.println(F(""));
+  Serial.println(F("Bobby Car Controller by @donjoergo"));
+  Serial.print(F("Version: "));
+  Serial.println(F(VERSION));
+  Serial.print(F("Build Date: "));
+  Serial.println(F(__DATE__));
+  Serial.println(F("[!] Debugging mode enabled"));
+  Serial.println(F(""));
+#endif
 
-  // Initialize analog input for the joystick (Nunchuck)
-  pinMode(JOY_X_PIN, INPUT);
+// Initialize nunchuk
+#ifndef SIMULATE_NUNCHUK
+  // nunchuk1.begin();
+  // if (nunchuk1.type == Unknown) {
+  //   nunchuk1.type = NUNCHUCK;
+  // }
+  Wire.begin();
+  nunchuk_init();
+#endif
+
+  //delay(1000);
+  detectDrivingMode();
 }
 
 void loop() {
-  // Read and map the joystick value to the speed range
-  int speed = readJoystick();
+  if (driveMode > 0 && driveMode < 5) {
+    unsigned long timeNow = millis();
 
-  // Send the speed value to the hoverboard via USART
-  sendToHoverboard(speed);
+    // Get Nunchuk input
+    unsigned int iNunchuk = getNunchukData();
+    unsigned int acc_cmd = map(constrain(iNunchuk, NUNCHUK_ACC_MIN, NUNCHUK_ACC_MAX), NUNCHUK_ACC_MIN, NUNCHUK_ACC_MAX, NUNCHUK_SIGNAL_MIN, NUNCHUK_SIGNAL_MAX);
+    unsigned int brk_cmd = map(constrain(iNunchuk, NUNCHUK_BRK_MIN, NUNCHUK_BRK_MAX), NUNCHUK_BRK_MAX, NUNCHUK_BRK_MIN, NUNCHUK_SIGNAL_MIN, NUNCHUK_SIGNAL_MAX);
+    bool ignoreBrk = acc_cmd < acc_cmd_prev ? true : false;
+    
+    acc_cmd_prev = acc_cmd;
 
-  // Read and process feedback from the hoverboard
-  readHoverboardFeedback();
+    // Serial.println(iNunchuk);
+    // Serial.println(acc_cmd);
+    // Serial.println(brk_cmd);
 
-  delay(100);  // Delay for smoother communication
-}
+    // Calculate speed depending on drive mode
+    int i = driveMode - 1;
 
-// Function to read and map the joystick value to the speed range
-int readJoystick() {
-  // Read joystick (Nunchuck) X-axis value from the analog pin
-  int joyX = analogRead(JOY_X_PIN);
+    // TODO Calculate speed from inputted kmh value
+    // TODO Make a nunchuk poti release required when going from forward in reverse
 
-  // Map the joystick X-axis value to the speed range (-1000 to 1000)
-  int speed = map(joyX, JOYSTICK_MIN, JOYSTICK_MAX, SPEED_MIN, SPEED_MAX);
-
-  return speed;  // Return the mapped speed value
-}
-
-// Function to send speed command to the motor controller
-void sendToHoverboard(int speed) {
-  // Create a data packet (adjust to match motor controller protocol)
-  byte buffer[4];
-
-  // Convert speed into a serial packet (adjust based on motor controller documentation)
-  buffer[0] = 0xAA;  // Start byte
-  buffer[1] = (speed & 0xFF00) >> 8;  // Speed high byte
-  buffer[2] = speed & 0x00FF;         // Speed low byte
-  buffer[3] = 0x55;  // End byte
-
-  hoverboardSerial.write(buffer, 4);  // Send the packet via USART
-
-  #ifdef DEBUG_MODE
-    // Debugging output for the data packet
-    Serial.print("Data sent: ");
-    for (int i = 0; i < 4; i++) {
-      Serial.print(buffer[i], HEX);
-      Serial.print(" ");
+    if (speed > 1) {
+      forceNunchukRelease = true;
     }
-    Serial.println();
-  #endif
-}
 
-// Function to read and process feedback from the hoverboard
-void readHoverboardFeedback() {
-  // Check if we have enough bytes for a full packet (14 bytes)
-  if (hoverboardSerial.available() >= 14) {
-    // Read the first two bytes for sync header
-    if (hoverboardSerial.read() == 0xAA && hoverboardSerial.read() == 0x55) {
-      // Read the remaining data into the feedback structure
-      feedback.cmd1 = readInt16();
-      feedback.cmd2 = readInt16();
-      feedback.speedLeft = readInt16();
-      feedback.speedRight = readInt16();
-      feedback.currentLeft = readInt16();
-      feedback.currentRight = readInt16();
-      feedback.voltage = readInt16();
-      feedback.temperature = readInt16();
-      feedback.cmdLed = readInt16();
-
-      // Print the feedback for debugging
-      #ifdef DEBUG_MODE
-        Serial.println("Feedback received:");
-        Serial.print("Command 1: "); Serial.println(feedback.cmd1);
-        Serial.print("Command 2: "); Serial.println(feedback.cmd2);
-        Serial.print("Speed Left: "); Serial.println(feedback.speedLeft);
-        Serial.print("Speed Right: "); Serial.println(feedback.speedRight);
-        Serial.print("Current Left: "); Serial.println(feedback.currentLeft);
-        Serial.print("Current Right: "); Serial.println(feedback.currentRight);
-        Serial.print("Voltage: "); Serial.println(feedback.voltage);
-        Serial.print("Temperature: "); Serial.println(feedback.temperature);
-        Serial.print("LED Command: "); Serial.println(feedback.cmdLed);
-      #endif
+    // Serial.println(acc_cmd);
+    // Serial.println(brk_cmd);
+    if ((acc_cmd < 6 && brk_cmd < 6) || ignoreBrk) {
+      forceNunchukRelease = false;
+      speed = speed * (1.0 - FREEWHEELING_DECELERATION);  //(speed > 0 ? MODES[i].ACC_FORWARDS / MODES[i].MAX_SPEED_FORWARDS * FREEWHEELING_DECELERATION * 1.0 : MODES[i].ACC_REVERSE / MODES[i].MAX_SPEED_REVERSE * FREEWHEELING_DECELERATION * 1.0));
+      // Serial.println("Freewheeling!");
+      // Serial.println(speed);
+      
+    } else if (acc_cmd > 6) {
+      speed += acc_cmd * MODES[i].ACC_FORWARD * 1.0;  // accelerating forwards
+      int maxSpeed = (acc_cmd * 1.0 / (NUNCHUK_SIGNAL_MAX - NUNCHUK_SIGNAL_MIN)) * MODES[i].MAX_SPEED_FORWARDS;
+      speed = constrain(speed, -1000, maxSpeed);
+      //Serial.println(speed);
+    } else if (brk_cmd > 6) {
+      speed -= brk_cmd * MODES[i].ACC_REVERSE * 1.0;  // accelerating backwards
+      int minSpeed = (brk_cmd * 1.0 / (NUNCHUK_SIGNAL_MAX - NUNCHUK_SIGNAL_MIN)) * MODES[i].MAX_SPEED_REVERSE;
+      speed = constrain(speed, forceNunchukRelease ? 0 : -minSpeed, 1000);
+      Serial.println("Braking!");
     }
+
+    // Serial.print("Speed: ");
+    // Serial.println(speed);
+
+    // Send commands
+    if (iTimeSend > timeNow) return;
+    iTimeSend = timeNow + TIME_SEND;
+    sendToHoverboard(0, round(speed));
+  } else {
+#ifdef DEBUG_MODE
+    Serial.println(F("[!] Drive Mode has invalid state!"));
+    Serial.println(F("[!] Power on and off to try again"));
+#endif
+    delay(3000);
   }
 }
 
-// Helper function to read two bytes and combine them into an int16_t
-int16_t readInt16() {
-  int16_t value = hoverboardSerial.read();           // Read lower byte
-  value |= (hoverboardSerial.read() << 8);  // Read upper byte and shift left
-  return value;
+// Move the Nunchuk joystick to the following positions while poweron:
+// Drive Mode 1, down:      3 kmh, no Turbo
+// Drive Mode 2, default:  10 kmh, no Turbo
+// Drive Mode 3, up:       17 kmh, no Turbo
+int detectDrivingMode() {
+  unsigned int tempDriveMode;
+  int yaxis;
+
+#ifndef SIMULATE_NUNCHUK
+  yaxis = getNunchukData();
+  //nunchuk1.readData();  // Read inputs and update maps
+  //yaxis = nunchuk1.values[1];
+#endif
+#ifdef SIMULATE_NUNCHUK
+  yaxis = 255;
+#endif
+
+  if (yaxis < 110 && yaxis >= 0) {
+    tempDriveMode = 4;
+  } else if (yaxis > 140 && yaxis <= 255) {
+    tempDriveMode = 3;
+  } else {
+    tempDriveMode = 2;
+  }
+#ifdef DEBUG_MODE
+  Serial.println(F("Waiting for nunchuk release..."));
+#endif
+
+  int counter = 0;
+  while (!(yaxis > 120 && yaxis < 136)) {
+#ifndef SIMULATE_NUNCHUK
+    yaxis = getNunchukData();
+    // nunchuk1.readData();  // Read inputs and update maps
+    //int yaxis = nunchuk1.values[1];
+#endif
+#ifdef SIMULATE_NUNCHUK
+    yaxis = 128;
+#endif
+
+// #ifdef DEBUG_MODE
+//     Serial.println(yaxis);
+// #endif
+
+    if (counter++ > 5000) {
+#ifdef DEBUG_MODE
+      Serial.println(F("Nunchuk is not around middle position for 5 sec. Powering off..."));
+      Serial.println(yaxis);
+#endif
+      beepShort(10);
+      return;
+    }
+    delay(100);
+  }
+
+  // Success!
+  driveMode = tempDriveMode;
+
+  // Beep the buzzer to inidicate drive mode
+  beepShort(driveMode);
+
+#ifdef DEBUG_MODE
+  Serial.println(F("Nunchuk released"));
+  Serial.println(F("Driving Mode detection done"));
+  Serial.print(F("[!] Drive Mode: "));
+  Serial.println(driveMode);
+
+  Serial.print(F("[!] Max Speed Fwd: "));
+  Serial.print(MODES[driveMode - 1].MAX_SPEED_FORWARDS);
+  Serial.print(F(", Max Speed Rev: "));
+  Serial.print(MODES[driveMode - 1].MAX_SPEED_REVERSE);
+  Serial.print(F(", Acc Fwd: "));
+  Serial.print(MODES[driveMode - 1].ACC_FORWARD);
+  Serial.print(F(", Acc Rev: "));
+  Serial.println(MODES[driveMode - 1].ACC_REVERSE);
+#endif
+}
+
+
+void beepShort(unsigned int beeps) {
+  for (int i = 0; i < beeps; i++) {
+    tone(BUZZER_PIN, 500);
+    delay(100);
+    noTone(BUZZER_PIN);
+    delay(100);
+#ifdef DEBUG_MODE
+    Serial.println(F("Beep"));
+#endif
+  }
+}
+
+
+int getNunchukData() {
+  int yaxis;
+
+#ifndef SIMULATE_NUNCHUK
+  if (nunchuk_read()) { 
+    yaxis =  nunchuk_joystickY_raw();
+  }
+
+  // Library Bug Workaround:
+  // Read out the Nunchuk again when it was the first read
+  if (initialNunchukRead) {
+    if (nunchuk_read()) { 
+      yaxis =  nunchuk_joystickY_raw();
+      initialNunchukRead = false;
+    }
+  }
+  
+
+  // nunchuk1.readData();  // Read inputs and update maps
+  // yaxis = nunchuk1.values[1];
+
+  // Serial.print("Before: ");
+  // Serial.println(yaxis);
+  // // Manipulate yaxis because nunchuk delivers the values with a offset...
+  // int MAGIC_NUMBER = 27;
+
+  // if (yaxis > MAGIC_NUMBER) {
+  //   yaxis -= MAGIC_NUMBER;
+  // }
+  // else {
+  //   yaxis = yaxis + 255 - MAGIC_NUMBER;
+  // }
+  // Serial.print("After : ");
+  // Serial.println(yaxis);
+
+#endif
+#ifdef SIMULATE_NUNCHUK
+  if (millis() < 4000) {
+    yaxis = 255;
+  } else if (millis() < 4000) {
+    yaxis = 127;
+  } else if (millis() < 5000) {
+    yaxis = 127;
+  } else if (millis() < 6000) {
+    yaxis = 0;
+  } else if (millis() > 8000) {
+    yaxis = 127;
+  }
+#endif
+
+  // #ifdef DEBUG_MODE
+  //   Serial.println(F("-------------------------------------------"));
+  //   Serial.println(nunchuk1.values[0]);  // X-Axis
+  //   Serial.println(nunchuk1.values[1]);  // Y-Axis
+  //   Serial.println(nunchuk1.values[10]); // Z-Button
+  //   Serial.println(nunchuk1.values[11]); // C-Button
+  // #endif
+
+  return yaxis;
 }
