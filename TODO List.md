@@ -13,8 +13,8 @@
     - [x] SuperSlow/Indoor/Children (max 3km/h)
     - [x] Slow/STVO (max 6km/h)
     - [x] Fast (max 17km/h / full 1000 throttle)
-  - [ ] Fix mode selection
-    - [ ] Mode selection should be always possible
+  - [x] Fix mode selection
+    - [x] Mode selection should be always possible
 - [ ] Make V1 code nicer
 - [ ] upload all source files
 
