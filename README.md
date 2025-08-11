@@ -6,7 +6,13 @@
 
 ![Bobby Car](./docs/pictures/bobby_car_01.jpg)
 ![Bobby Car with trailer](./docs/pictures/bobby_car_02.jpg)
+![Bobby Car with trailer](./docs/pictures/bobby_car_03.jpg)
 This DIY project is around a Bobby Car which is four-wheel-drive and motorized with the hardware of two cheap hoverboards. Also it features a trailer which can transport a 60x40cm Eurobox or 2 beverage crates or up to two people at once.
+
+
+## Features of the Bobby Car
+- TODO add current features
+
 
 ## Feature Wish List
 For the wishlist of the features have a look into the [TODO list](./TODO%20List.md).
