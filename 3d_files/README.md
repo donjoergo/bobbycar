@@ -1,1 +1,0 @@
-For the 3D files have a look at my [Makerworld account](https://makerworld.com/en/collections/8438302-bobby-car).
