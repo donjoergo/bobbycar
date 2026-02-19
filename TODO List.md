@@ -21,6 +21,13 @@
 - [ ] Make V1 code nicer
 - [ ] upload all source files
 
+## V2 Battery Pack
+
+- [ ] Test battery cells from all 3 packs
+- [ ] Build new battery pack
+- [ ] Test new battery pack
+
+
 ## V2
 
 - [ ] Add led ring for status feedback, like
