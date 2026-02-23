@@ -81,7 +81,8 @@ I will test the capacity of the old cells with an DL24 150W load tester and will
 For the new battery pack I want to keep charging as easy as it is right now. Only need to plug in one cable and it starts charging.
 This means that I need a new BMS which can handle 12S packs.
 After some searching and comparing the different manufacturers I chose the "8S-17S 60A" Smart BMS from Daly. As the BMS is "smart" I can read out telematry data over an app. I hope that I will also connect it to the Arduino controller via UART or CAN in the future.
-![BMS](./docs/images/bms.jpg)
+
+<img src="./docs/pictures/bms.png" height="400">
 
 #### Charger
 
