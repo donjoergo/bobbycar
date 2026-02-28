@@ -83,7 +83,7 @@ SerialCommand Command;
 // Arduino IDE auto-generates these prototypes for .ino tabs.
 // In PlatformIO/C++ they need to be declared explicitly.
 void sendToHoverboard(int16_t uSteer, int16_t uSpeed);
-int detectDrivingMode();
+bool detectDrivingMode();
 void beepShort(unsigned int beeps);
 int getNunchukY();
 
@@ -139,9 +139,9 @@ void loop() {
     unsigned long timeNow = millis();
 
     // Get Nunchuk input
-    unsigned int iNunchuk = getNunchukY();
-    unsigned int iNunchuckC;
-    unsigned int iNunchuckZ;
+    int iNunchuk = getNunchukY();
+    unsigned int iNunchuckC = 0;
+    unsigned int iNunchuckZ = 0;
     if (nunchuk_read()) {
       iNunchuckC = nunchuk_buttonC();
       iNunchuckZ = nunchuk_buttonZ();
@@ -212,13 +212,13 @@ void loop() {
 // Drive Mode 1, down:      3 kmh, no Turbo
 // Drive Mode 2, default:  10 kmh, no Turbo
 // Drive Mode 3, up:       17 kmh, no Turbo
-int detectDrivingMode() {
+bool detectDrivingMode() {
   // when entering the function, beep once
   beepShort(1);
 
   unsigned int tempDriveMode;
-  int xaxis;
-  int yaxis;
+  int xaxis = NUNCHUK_JOYSTICK_X_ZERO;
+  int yaxis = NUNCHUK_JOYSTICK_Y_ZERO;
 
 
 #ifndef SIMULATE_NUNCHUK
@@ -258,12 +258,13 @@ int detectDrivingMode() {
       Serial.println(yaxis);
 #endif
       beepShort(10);
-      return;
+      return false;
     }
     delay(50);
   }
 
   bool modeFound = false;
+  unsigned long modeSelectionStart = millis();
   while (!modeFound) {
     if (nunchuk_read()) {
       xaxis = nunchuk_joystickX_raw();
@@ -282,6 +283,14 @@ int detectDrivingMode() {
       tempDriveMode = 4;
       modeFound = true;
     }
+    if (millis() - modeSelectionStart > 5000) {
+#ifdef DEBUG_MODE
+      Serial.println(F("No valid drive mode selection within 5 sec. Powering off..."));
+#endif
+      beepShort(10);
+      return false;
+    }
+    delay(50);
   }
 
 #ifdef DEBUG_MODE
@@ -312,7 +321,7 @@ int detectDrivingMode() {
       Serial.println(yaxis);
 #endif
       beepShort(10);
-      return;
+      return false;
     }
     delay(50);
   }
@@ -340,6 +349,8 @@ int detectDrivingMode() {
   Serial.print(F(", Acc Rev: "));
   Serial.println(MODES[driveMode - 1].ACC_REVERSE);
 #endif
+
+  return true;
 }
 
 
@@ -357,11 +368,13 @@ void beepShort(unsigned int beeps) {
 
 
 int getNunchukY() {
-  int yaxis;
+  static int lastY = NUNCHUK_JOYSTICK_Y_ZERO;
+  int yaxis = lastY;
 
 #ifndef SIMULATE_NUNCHUK
   if (nunchuk_read()) {
     yaxis = nunchuk_joystickY_raw();
+    lastY = yaxis;
   }
 
   // Library Bug Workaround:
@@ -369,6 +382,7 @@ int getNunchukY() {
   if (initialNunchukRead) {
     if (nunchuk_read()) {
       yaxis = nunchuk_joystickY_raw();
+      lastY = yaxis;
       initialNunchukRead = false;
     }
   }
@@ -404,6 +418,7 @@ int getNunchukY() {
   } else if (millis() > 8000) {
     yaxis = 127;
   }
+  lastY = yaxis;
 #endif
 
   // #ifdef DEBUG_MODE
@@ -426,6 +441,5 @@ void sendToHoverboard(int16_t uSteer, int16_t uSpeed)
   Command.checksum = (uint16_t)(Command.start ^ Command.steer ^ Command.speed);
 
   // Write to Serial
-  HoverSerial.write((uint8_t *) &Command, sizeof(Command)); 
+  HoverSerial.write(reinterpret_cast<const uint8_t*>(&Command), sizeof(Command));
 }
-
