@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <SoftwareSerial.h>
 #include <Wire.h>
 #include "nunchuk.h"
@@ -78,6 +79,13 @@ typedef struct {
   uint16_t checksum;
 } SerialCommand;
 SerialCommand Command;
+
+// Arduino IDE auto-generates these prototypes for .ino tabs.
+// In PlatformIO/C++ they need to be declared explicitly.
+void sendToHoverboard(int16_t uSteer, int16_t uSpeed);
+int detectDrivingMode();
+void beepShort(unsigned int beeps);
+int getNunchukY();
 
 
 // Feedback structure (based on the hoverboard packet structure)
@@ -408,3 +416,16 @@ int getNunchukY() {
 
   return yaxis;
 }
+
+void sendToHoverboard(int16_t uSteer, int16_t uSpeed)
+{
+  // Create command
+  Command.start    = (uint16_t)START_FRAME;
+  Command.steer    = (int16_t)uSteer;
+  Command.speed    = (int16_t)uSpeed;
+  Command.checksum = (uint16_t)(Command.start ^ Command.steer ^ Command.speed);
+
+  // Write to Serial
+  HoverSerial.write((uint8_t *) &Command, sizeof(Command)); 
+}
+
