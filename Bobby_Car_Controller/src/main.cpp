@@ -6,7 +6,7 @@
 // ########################## GLOBAL STATE ##########################
 unsigned long iTimeSend = 0;
 float speed = 0.0f;
-unsigned int driveMode = 2; // Default driving mode (Modes 1 to 4 available)
+unsigned int driveMode = DEFAULT_DRIVE_MODE; // Default driving mode (Modes 1 to 4 available)
 bool forceNunchukRelease = false;
 unsigned int acc_cmd_prev = 0;
 
@@ -36,10 +36,9 @@ void setup() {
 
   nunchukInputInit(); // Initialize I2C and Nunchuk hardware
 
-  // Interactive drive mode selection at boot (currently bypassed in favor of default mode 2)
+  // Interactive drive mode selection at boot (currently bypassed; driveMode defaults to DEFAULT_DRIVE_MODE)
   // delay(1000);
   // detectDrivingMode();
-  driveMode = 2;
   beepShort(driveMode);
 }
 

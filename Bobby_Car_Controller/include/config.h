@@ -102,6 +102,9 @@ struct ModeParameters {
   float ACC_REVERSE;               // Reverse acceleration rate (speed added per loop cycle)
 };
 
+// Driving mode selected at boot (1 = Gentle, 2 = Standard, 3 = Sport, 4 = Turbo)
+constexpr unsigned int DEFAULT_DRIVE_MODE = 2;
+
 // Driving mode configurations:
 // Formula: speed [km/h] = rpm / 31.45  <-->  rpm = speed [km/h] * 31.45
 // - Mode 1 (Gentle):    ~4 km/h max, soft acceleration for beginners
