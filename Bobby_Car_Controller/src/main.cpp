@@ -235,8 +235,5 @@ void beepShort(unsigned int beeps) {
     delay(100);
     noTone(BUZZER_PIN);
     delay(100);
-#ifdef DEBUG_MODE
-    Serial.println(F("Beep"));
-#endif
   }
 }
