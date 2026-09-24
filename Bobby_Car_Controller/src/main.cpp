@@ -8,7 +8,6 @@ unsigned long iTimeSend = 0;
 float speed = 0.0f;
 unsigned int driveMode = DEFAULT_DRIVE_MODE; // Default driving mode (Modes 1 to 4 available)
 bool forceNunchukRelease = false;
-unsigned int acc_cmd_prev = 0;
 
 // Function prototypes
 bool detectDrivingMode();
@@ -71,8 +70,6 @@ void loop() {
     // 2. Decode throttle and brake commands
     unsigned int acc_cmd = getAccelerationCommand(iNunchuk);
     unsigned int brk_cmd = getBrakeCommand(iNunchuk);
-    bool ignoreBrk = acc_cmd < acc_cmd_prev; // Ignore transient brake signals when releasing throttle
-    acc_cmd_prev = acc_cmd;
 
     int i = driveMode - 1;
 
@@ -82,15 +79,21 @@ void loop() {
     }
 
     // 3. Speed state machine: Freewheeling vs. Accelerating vs. Braking/Reverse
-    if ((acc_cmd < ACC_ACTIVE_THRESHOLD && brk_cmd < ACC_ACTIVE_THRESHOLD) || ignoreBrk) {
+    if (acc_cmd < ACC_ACTIVE_THRESHOLD && brk_cmd < ACC_ACTIVE_THRESHOLD) {
       // Natural freewheeling deceleration
       forceNunchukRelease = false;
       speed = speed * (1.0f - FREEWHEELING_DECELERATION);
     } else if (acc_cmd > ACC_ACTIVE_THRESHOLD) {
-      // Forward acceleration
-      speed += acc_cmd * MODES[i].ACC_FORWARD * 1.0f;
-      int maxSpeed = (acc_cmd * 1.0f / (NUNCHUK_SIGNAL_MAX - NUNCHUK_SIGNAL_MIN)) * MODES[i].MAX_SPEED_FORWARDS;
-      speed = constrain(speed, -1000.0f, maxSpeed);
+      // Throttle position defines the new set speed
+      int setSpeed = (acc_cmd * 1.0f / (NUNCHUK_SIGNAL_MAX - NUNCHUK_SIGNAL_MIN)) * MODES[i].MAX_SPEED_FORWARDS;
+      if (speed > setSpeed) {
+        // Coast down to the new set speed instead of applying it instantly
+        speed = speed * (1.0f - FREEWHEELING_DECELERATION);
+      } else {
+        // Forward acceleration
+        speed += acc_cmd * MODES[i].ACC_FORWARD * 1.0f;
+        speed = constrain(speed, -1000.0f, setSpeed);
+      }
     } else if (brk_cmd > BRK_ACTIVE_THRESHOLD) {
       // Deceleration / reverse acceleration with safety lockout
       speed -= brk_cmd * MODES[i].ACC_REVERSE * 1.0f;
